@@ -1,15 +1,23 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
+// SokobanGameMode.cpp
 #include "SokobanGameMode.h"
-#include "SokobanCharacter.h"
-#include "UObject/ConstructorHelpers.h"
+#include "SokobanPlayerController.h"
+#include "SokobanPawn.h"
 
 ASokobanGameMode::ASokobanGameMode()
 {
-	// set default pawn class to our Blueprinted character
-	static ConstructorHelpers::FClassFinder<APawn> PlayerPawnBPClass(TEXT("/Game/ThirdPerson/Blueprints/BP_ThirdPersonCharacter"));
-	if (PlayerPawnBPClass.Class != NULL)
+	PlayerControllerClass = ASokobanPlayerController::StaticClass();
+	DefaultPawnClass = nullptr;  // GridManager spawns the pawn, not GameMode
+}
+
+void ASokobanGameMode::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Camera setup: find the player controller, set fixed view
+	APlayerController* PC = GetWorld()->GetFirstPlayerController();
+	if (PC)
 	{
-		DefaultPawnClass = PlayerPawnBPClass.Class;
+		// Disable default pawn possession since GridManager handles it
+		// Camera will be set up separately
 	}
 }

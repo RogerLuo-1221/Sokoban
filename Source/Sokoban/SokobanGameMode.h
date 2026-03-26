@@ -1,19 +1,17 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
+// SokobanGameMode.h
 #pragma once
-
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "SokobanGameMode.generated.h"
 
-UCLASS(minimalapi)
-class ASokobanGameMode : public AGameModeBase
+UCLASS()
+class SOKOBAN_API ASokobanGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
 
 public:
 	ASokobanGameMode();
+
+protected:
+	virtual void BeginPlay() override;
 };
-
-
-
