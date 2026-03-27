@@ -30,12 +30,21 @@ void ASokobanGridManager::BeginPlay()
     {
         UE_LOG(LogTemp, Log, TEXT("GridManager: Loading play-test level from %s"), *TempPath);
         LoadLevelFromJSON(TempPath);
-        // Delete temp file so next normal PIE uses default
         IFileManager::Get().Delete(*TempPath);
+        bPlayTestMode = true;
     }
     else
     {
-        LoadDefaultLevel();
+        // Scan for level files and load the first one
+        ScanLevelFiles();
+        if (LevelFiles.Num() > 0)
+        {
+            LoadLevelByIndex(0);
+        }
+        else
+        {
+            LoadDefaultLevel();
+        }
     }
 
     BuildLevel();
@@ -165,23 +174,30 @@ void ASokobanGridManager::LoadLevelFromJSON(const FString& FilePath)
         }
     }
 
-    // Parse tiles array: each element is an int mapping to TileType
-    const TArray<TSharedPtr<FJsonValue>>& TilesArray = JsonObj->GetArrayField(TEXT("tiles"));
-    for (int32 i = 0; i < TilesArray.Num() && i < Grid.Num(); i++)
+    // Parse tiles (2D array: rows[X][Y])
+    const TArray<TSharedPtr<FJsonValue>>& TilesRows = JsonObj->GetArrayField(TEXT("tiles"));
+    for (int32 X = 0; X < TilesRows.Num() && X < Height; X++)
     {
-        Grid[i].TileType = static_cast<ETileType>(TilesArray[i]->AsNumber());
+        const TArray<TSharedPtr<FJsonValue>>& Row = TilesRows[X]->AsArray();
+        for (int32 Y = 0; Y < Row.Num() && Y < Width; Y++)
+        {
+            Grid[X * Width + Y].TileType = static_cast<ETileType>((int32)Row[Y]->AsNumber());
+        }
     }
 
-    // Parse entities array
-    const TArray<TSharedPtr<FJsonValue>>& EntitiesArray = JsonObj->GetArrayField(TEXT("entities"));
-    for (int32 i = 0; i < EntitiesArray.Num() && i < Grid.Num(); i++)
+    // Parse entities (2D array: rows[X][Y])
+    const TArray<TSharedPtr<FJsonValue>>& EntitiesRows = JsonObj->GetArrayField(TEXT("entities"));
+    for (int32 X = 0; X < EntitiesRows.Num() && X < Height; X++)
     {
-        EEntityType Entity = static_cast<EEntityType>(EntitiesArray[i]->AsNumber());
-        Grid[i].EntityType = Entity;
-
-        if (Entity == EEntityType::Player)
+        const TArray<TSharedPtr<FJsonValue>>& Row = EntitiesRows[X]->AsArray();
+        for (int32 Y = 0; Y < Row.Num() && Y < Width; Y++)
         {
-            PlayerGridPos = Grid[i].Coordinate;
+            EEntityType Entity = static_cast<EEntityType>((int32)Row[Y]->AsNumber());
+            Grid[X * Width + Y].EntityType = Entity;
+            if (Entity == EEntityType::Player)
+            {
+                PlayerGridPos = FIntPoint(X, Y);
+            }
         }
     }
 
@@ -267,6 +283,8 @@ void ASokobanGridManager::ClearLevel()
 
 bool ASokobanGridManager::TryMove(EGridDirection Dir)
 {
+    if (bLevelComplete) return false;
+
     FIntPoint Offset = DirToOffset(Dir);
     FIntPoint Target = PlayerGridPos + Offset;
 
@@ -448,6 +466,7 @@ void ASokobanGridManager::CheckWinCondition()
 
     if (TotalPads > 0 && CoveredPads == TotalPads)
     {
+        bLevelComplete = true;
         UE_LOG(LogTemp, Warning, TEXT("=== LEVEL COMPLETE ==="));
         if (GEngine)
         {
@@ -523,4 +542,68 @@ FVector ASokobanGridManager::GetGridCenter() const
         (Height - 1) * CellSize * 0.5f,
         (Width - 1) * CellSize * 0.5f,
         0.f);
+}
+
+// ============================================================
+// Level Flow
+// ============================================================
+
+void ASokobanGridManager::ScanLevelFiles()
+{
+    FString LevelDir = FPaths::ProjectContentDir() / TEXT("Levels") / TEXT("LevelData");
+
+    TArray<FString> FileNames;
+    IFileManager::Get().FindFiles(FileNames, *(LevelDir / TEXT("*.json")), true, false);
+    FileNames.Sort();
+
+    LevelFiles.Empty();
+    for (const FString& FileName : FileNames)
+    {
+        LevelFiles.Add(LevelDir / FileName);
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("GridManager: Found %d level files"), LevelFiles.Num());
+}
+
+void ASokobanGridManager::LoadLevelByIndex(int32 Index)
+{
+    if (!LevelFiles.IsValidIndex(Index)) return;
+
+    CurrentLevelIndex = Index;
+    bLevelComplete = false;
+    UndoStack.Empty();
+
+    LoadLevelFromJSON(LevelFiles[Index]);
+
+    UE_LOG(LogTemp, Log, TEXT("GridManager: Loaded level %d/%d: %s"),
+        Index + 1, LevelFiles.Num(), *FPaths::GetBaseFilename(LevelFiles[Index]));
+}
+
+void ASokobanGridManager::LoadNextLevel()
+{
+    if (bPlayTestMode)
+    {
+        // PlayTest mode: no level sequence, just show completion
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("PlayTest complete. Return to editor."));
+        }
+        return;
+    }
+
+    int32 NextIndex = CurrentLevelIndex + 1;
+    if (NextIndex >= LevelFiles.Num())
+    {
+        // All levels complete
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Yellow, TEXT("=== ALL LEVELS COMPLETE! ==="));
+        }
+        UE_LOG(LogTemp, Warning, TEXT("=== ALL LEVELS COMPLETE ==="));
+        return;
+    }
+
+    ClearLevel();
+    LoadLevelByIndex(NextIndex);
+    BuildLevel();
 }

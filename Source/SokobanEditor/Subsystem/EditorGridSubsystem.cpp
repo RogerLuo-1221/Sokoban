@@ -141,18 +141,29 @@ bool UEditorGridSubsystem::IsValidCoord(FIntPoint Coord) const
 void UEditorGridSubsystem::SaveToJSON(const FString& FullPath)
 {
 	TSharedRef<FJsonObject> JsonObj = MakeShared<FJsonObject>();
+	JsonObj->SetStringField("name", LevelName);
 	JsonObj->SetNumberField("width", Width);
 	JsonObj->SetNumberField("height", Height);
+	JsonObj->SetStringField("_tile_legend", "0=Normal 1=Wall 2=Ice 3=TargetPad");
+	JsonObj->SetStringField("_entity_legend", "0=None 1=Box 2=Player");
 
-	TArray<TSharedPtr<FJsonValue>> TilesArray;
-	TArray<TSharedPtr<FJsonValue>> EntitiesArray;
-	for (const FGridCell& Cell : Grid)
+	// 2D arrays: outer = rows (GridX, 0..Height-1), inner = columns (GridY, 0..Width-1)
+	TArray<TSharedPtr<FJsonValue>> TilesRows;
+	TArray<TSharedPtr<FJsonValue>> EntitiesRows;
+	for (int32 X = 0; X < Height; X++)
 	{
-		TilesArray.Add(MakeShared<FJsonValueNumber>((int32)Cell.TileType));
-		EntitiesArray.Add(MakeShared<FJsonValueNumber>((int32)Cell.EntityType));
+		TArray<TSharedPtr<FJsonValue>> TileRow, EntityRow;
+		for (int32 Y = 0; Y < Width; Y++)
+		{
+			const FGridCell& Cell = Grid[X * Width + Y];
+			TileRow.Add(MakeShared<FJsonValueNumber>((int32)Cell.TileType));
+			EntityRow.Add(MakeShared<FJsonValueNumber>((int32)Cell.EntityType));
+		}
+		TilesRows.Add(MakeShared<FJsonValueArray>(TileRow));
+		EntitiesRows.Add(MakeShared<FJsonValueArray>(EntityRow));
 	}
-	JsonObj->SetArrayField("tiles", TilesArray);
-	JsonObj->SetArrayField("entities", EntitiesArray);
+	JsonObj->SetArrayField("tiles", TilesRows);
+	JsonObj->SetArrayField("entities", EntitiesRows);
 
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
@@ -195,18 +206,26 @@ void UEditorGridSubsystem::LoadFromJSON(const FString& FullPath)
 		}
 	}
 
-	// Parse tiles
-	const TArray<TSharedPtr<FJsonValue>>& Tiles = JsonObj->GetArrayField("tiles");
-	for (int32 i = 0; i < Tiles.Num() && i < Grid.Num(); i++)
+	// Parse tiles (2D array: rows[X][Y])
+	const TArray<TSharedPtr<FJsonValue>>& TilesRows = JsonObj->GetArrayField("tiles");
+	for (int32 X = 0; X < TilesRows.Num() && X < Height; X++)
 	{
-		Grid[i].TileType = static_cast<ETileType>((int32)Tiles[i]->AsNumber());
+		const TArray<TSharedPtr<FJsonValue>>& Row = TilesRows[X]->AsArray();
+		for (int32 Y = 0; Y < Row.Num() && Y < Width; Y++)
+		{
+			Grid[X * Width + Y].TileType = static_cast<ETileType>((int32)Row[Y]->AsNumber());
+		}
 	}
 
-	// Parse entities
-	const TArray<TSharedPtr<FJsonValue>>& Entities = JsonObj->GetArrayField("entities");
-	for (int32 i = 0; i < Entities.Num() && i < Grid.Num(); i++)
+	// Parse entities (2D array: rows[X][Y])
+	const TArray<TSharedPtr<FJsonValue>>& EntitiesRows = JsonObj->GetArrayField("entities");
+	for (int32 X = 0; X < EntitiesRows.Num() && X < Height; X++)
 	{
-		Grid[i].EntityType = static_cast<EEntityType>((int32)Entities[i]->AsNumber());
+		const TArray<TSharedPtr<FJsonValue>>& Row = EntitiesRows[X]->AsArray();
+		for (int32 Y = 0; Y < Row.Num() && Y < Width; Y++)
+		{
+			Grid[X * Width + Y].EntityType = static_cast<EEntityType>((int32)Row[Y]->AsNumber());
+		}
 	}
 
 	// Extract level name from file path
@@ -223,11 +242,14 @@ static FString GetDefaultLevelDataDir()
 
 void UEditorGridSubsystem::SaveWithDialog()
 {
-	// Warn (but don't block) if level is incomplete
-	FString Warning;
-	if (!ValidateLevel(Warning))
+	// Hard constraint: block save if level is invalid
+	FString Error;
+	if (!ValidateLevel(Error))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SaveWithDialog: Level validation warning: %s"), *Warning);
+		FMessageDialog::Open(EAppMsgType::Ok,
+			FText::Format(NSLOCTEXT("SokobanEditor", "SaveValidation", "Cannot save: {0}"),
+			FText::FromString(Error)));
+		return;
 	}
 
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
@@ -292,6 +314,11 @@ bool UEditorGridSubsystem::ValidateLevel(FString& OutError) const
 	if (Players == 0) { OutError = TEXT("No player placed!"); return false; }
 	if (Boxes == 0) { OutError = TEXT("No boxes placed!"); return false; }
 	if (Targets == 0) { OutError = TEXT("No target pads placed!"); return false; }
+	if (Boxes != Targets)
+	{
+		OutError = FString::Printf(TEXT("Box count (%d) != TargetPad count (%d)!"), Boxes, Targets);
+		return false;
+	}
 	return true;
 }
 

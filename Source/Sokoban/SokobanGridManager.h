@@ -95,7 +95,31 @@ private:
 
     // --- Default level for testing ---
     void LoadDefaultLevel();
-    
+
     // --- Camera Setting ---
     void SetupCamera();
+
+    // --- Level flow ---
+    TArray<FString> LevelFiles;
+    int32 CurrentLevelIndex = 0;
+    bool bLevelComplete = false;
+    bool bPlayTestMode = false;
+    FTimerHandle NextLevelTimer;
+
+    void ScanLevelFiles();
+    void LoadLevelByIndex(int32 Index);
+
+public:
+    /** Called by UI to advance to the next level after win screen. */
+    UFUNCTION(BlueprintCallable, Category = "Levels")
+    void LoadNextLevel();
+
+    UFUNCTION(BlueprintPure, Category = "Levels")
+    bool IsLevelComplete() const { return bLevelComplete; }
+
+    UFUNCTION(BlueprintPure, Category = "Levels")
+    int32 GetCurrentLevelIndex() const { return CurrentLevelIndex; }
+
+    UFUNCTION(BlueprintPure, Category = "Levels")
+    int32 GetTotalLevelCount() const { return LevelFiles.Num(); }
 };
