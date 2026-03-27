@@ -4,6 +4,7 @@
 #include "SokobanBoxActor.h"
 #include "SokobanTileActor.h"
 #include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Camera/CameraActor.h"
@@ -23,9 +24,20 @@ void ASokobanGridManager::BeginPlay()
 {
     Super::BeginPlay();
 
-    // For now, load a hardcoded test level
-    // Later: GameMode tells us which JSON to load
-    LoadDefaultLevel();
+    // Check for editor play-test temp file first
+    FString TempPath = FPaths::ProjectSavedDir() / TEXT("Temp") / TEXT("SokobanPlayTest.json");
+    if (FPaths::FileExists(TempPath))
+    {
+        UE_LOG(LogTemp, Log, TEXT("GridManager: Loading play-test level from %s"), *TempPath);
+        LoadLevelFromJSON(TempPath);
+        // Delete temp file so next normal PIE uses default
+        IFileManager::Get().Delete(*TempPath);
+    }
+    else
+    {
+        LoadDefaultLevel();
+    }
+
     BuildLevel();
 }
 
@@ -41,11 +53,11 @@ void ASokobanGridManager::LoadDefaultLevel()
     Grid.SetNum(Width * Height);
 
     // Init all cells as Normal/None
-    for (int32 Y = 0; Y < Height; Y++)
+    for (int32 X = 0; X < Height; X++)
     {
-        for (int32 X = 0; X < Width; X++)
+        for (int32 Y = 0; Y < Width; Y++)
         {
-            FGridCell& Cell = Grid[Y * Width + X];
+            FGridCell& Cell = Grid[X * Width + Y];
             Cell.Coordinate = FIntPoint(X, Y);
             Cell.TileType = ETileType::Normal;
             Cell.EntityType = EEntityType::None;
@@ -53,15 +65,17 @@ void ASokobanGridManager::LoadDefaultLevel()
     }
 
     // Walls around the border
-    for (int32 X = 0; X < Width; X++)
-    {
-        GetCell(FIntPoint(X, 0)).TileType = ETileType::Wall;
-        GetCell(FIntPoint(X, Height - 1)).TileType = ETileType::Wall;
-    }
-    for (int32 Y = 0; Y < Height; Y++)
+    // Top & bottom rows (X=0 and X=Height-1)
+    for (int32 Y = 0; Y < Width; Y++)
     {
         GetCell(FIntPoint(0, Y)).TileType = ETileType::Wall;
-        GetCell(FIntPoint(Width - 1, Y)).TileType = ETileType::Wall;
+        GetCell(FIntPoint(Height - 1, Y)).TileType = ETileType::Wall;
+    }
+    // Left & right columns (Y=0 and Y=Width-1)
+    for (int32 X = 0; X < Height; X++)
+    {
+        GetCell(FIntPoint(X, 0)).TileType = ETileType::Wall;
+        GetCell(FIntPoint(X, Width - 1)).TileType = ETileType::Wall;
     }
 
     // Player at (1,1)
@@ -97,14 +111,16 @@ void ASokobanGridManager::SetupCamera()
     float HalfFOVRad = FMath::DegreesToRadians(45.f);
     float Distance = (GridExtent * 0.5f) / FMath::Tan(HalfFOVRad);
     
-    float CamHeight = Distance;
-    float HorizontalDist = Distance;
-    
+    float PitchDeg = 60.f;
+    float PitchRad = FMath::DegreesToRadians(PitchDeg);
+    float CamHeight = Distance * FMath::Sin(PitchRad);
+    float HorizontalDist = Distance * FMath::Cos(PitchRad);
+
     FVector CamPos = Center + FVector(-HorizontalDist, 0, CamHeight);
-    CamPos.Y -= CellSize * 0.5f;
-    CamPos.X -= CellSize;
-    
-    FRotator CamRot = FRotator(-45.f, 0.f, 0.f);
+    CamPos.X -= CellSize * 1.5f;
+    CamPos.Z += CellSize * 0.5f;
+
+    FRotator CamRot = FRotator(-PitchDeg, 0.f, 0.f);
 
     PC->SetControlRotation(CamRot);
     
@@ -138,11 +154,11 @@ void ASokobanGridManager::LoadLevelFromJSON(const FString& FilePath)
     Grid.SetNum(Width * Height);
 
     // Init all cells
-    for (int32 Y = 0; Y < Height; Y++)
+    for (int32 X = 0; X < Height; X++)
     {
-        for (int32 X = 0; X < Width; X++)
+        for (int32 Y = 0; Y < Width; Y++)
         {
-            FGridCell& Cell = Grid[Y * Width + X];
+            FGridCell& Cell = Grid[X * Width + Y];
             Cell.Coordinate = FIntPoint(X, Y);
             Cell.TileType = ETileType::Normal;
             Cell.EntityType = EEntityType::None;
@@ -256,29 +272,66 @@ bool ASokobanGridManager::TryMove(EGridDirection Dir)
 
     if (!IsValidCoord(Target)) return false;
 
-    FGridCell& TargetCell = GetCell(Target);
+    const FGridCell& TargetCell = GetCellConst(Target);
 
     // Wall blocks
     if (TargetCell.TileType == ETileType::Wall) return false;
 
     bool bPushBox = false;
-    FIntPoint BoxTarget;
+    FIntPoint BoxFrom = Target;
+    FIntPoint BoxFinal = Target;
 
     // Box push check
     if (TargetCell.EntityType == EEntityType::Box)
     {
-        BoxTarget = Target + Offset;
+        FIntPoint BoxPush = Target + Offset;
 
-        if (!IsValidCoord(BoxTarget)) return false;
+        if (!IsValidCoord(BoxPush)) return false;
 
-        const FGridCell& BehindBox = GetCellConst(BoxTarget);
+        const FGridCell& BehindBox = GetCellConst(BoxPush);
         if (BehindBox.TileType == ETileType::Wall) return false;
         if (BehindBox.EntityType == EEntityType::Box) return false;
 
         bPushBox = true;
+
+        // Compute box final position after ice sliding
+        BoxFinal = BoxPush;
+        while (GetCellConst(BoxFinal).TileType == ETileType::Ice)
+        {
+            FIntPoint Next = BoxFinal + Offset;
+            if (!IsValidCoord(Next)) break;
+            if (GetCellConst(Next).TileType == ETileType::Wall) break;
+            if (GetCellConst(Next).EntityType == EEntityType::Box) break;
+            BoxFinal = Next;
+        }
     }
 
-    ExecuteMove(Target, bPushBox, Target, BoxTarget);
+    // Compute player final position after ice sliding
+    // Temporarily update box position in grid so player slide calculation is accurate
+    if (bPushBox)
+    {
+        GetCell(BoxFrom).EntityType = EEntityType::None;
+        GetCell(BoxFinal).EntityType = EEntityType::Box;
+    }
+
+    FIntPoint PlayerFinal = Target;
+    while (GetCellConst(PlayerFinal).TileType == ETileType::Ice)
+    {
+        FIntPoint Next = PlayerFinal + Offset;
+        if (!IsValidCoord(Next)) break;
+        if (GetCellConst(Next).TileType == ETileType::Wall) break;
+        if (GetCellConst(Next).EntityType != EEntityType::None) break;
+        PlayerFinal = Next;
+    }
+
+    // Restore grid state (ExecuteMove will do the real update)
+    if (bPushBox)
+    {
+        GetCell(BoxFinal).EntityType = EEntityType::None;
+        GetCell(BoxFrom).EntityType = EEntityType::Box;
+    }
+
+    ExecuteMove(PlayerFinal, bPushBox, BoxFrom, BoxFinal);
     return true;
 }
 
@@ -396,6 +449,10 @@ void ASokobanGridManager::CheckWinCondition()
     if (TotalPads > 0 && CoveredPads == TotalPads)
     {
         UE_LOG(LogTemp, Warning, TEXT("=== LEVEL COMPLETE ==="));
+        if (GEngine)
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("=== LEVEL COMPLETE! ==="));
+        }
         OnLevelComplete.Broadcast();
     }
 }
@@ -422,28 +479,28 @@ bool ASokobanGridManager::IsMoving() const
 
 FGridCell& ASokobanGridManager::GetCell(FIntPoint Coord)
 {
-    return Grid[Coord.Y * Width + Coord.X];
+    return Grid[Coord.X * Width + Coord.Y];
 }
 
 const FGridCell& ASokobanGridManager::GetCellConst(FIntPoint Coord) const
 {
-    return Grid[Coord.Y * Width + Coord.X];
+    return Grid[Coord.X * Width + Coord.Y];
 }
 
 bool ASokobanGridManager::IsValidCoord(FIntPoint Coord) const
 {
-    return Coord.X >= 0 && Coord.X < Width &&
-           Coord.Y >= 0 && Coord.Y < Height;
+    return Coord.X >= 0 && Coord.X < Height &&
+           Coord.Y >= 0 && Coord.Y < Width;
 }
 
 FIntPoint ASokobanGridManager::DirToOffset(EGridDirection Dir) const
 {
     switch (Dir)
     {
-        case EGridDirection::North: return FIntPoint(0, 1);
-        case EGridDirection::South: return FIntPoint(0, -1);
-        case EGridDirection::East:  return FIntPoint(1, 0);
-        case EGridDirection::West:  return FIntPoint(-1, 0);
+        case EGridDirection::North: return FIntPoint(1, 0);
+        case EGridDirection::South: return FIntPoint(-1, 0);
+        case EGridDirection::East:  return FIntPoint(0, 1);
+        case EGridDirection::West:  return FIntPoint(0, -1);
         default: return FIntPoint::ZeroValue;
     }
 }
@@ -463,7 +520,7 @@ FIntPoint ASokobanGridManager::WorldToGrid(FVector WorldPos) const
 FVector ASokobanGridManager::GetGridCenter() const
 {
     return FVector(
-        Width * CellSize * 0.5f,
-        Height * CellSize * 0.5f,
+        (Height - 1) * CellSize * 0.5f,
+        (Width - 1) * CellSize * 0.5f,
         0.f);
 }
