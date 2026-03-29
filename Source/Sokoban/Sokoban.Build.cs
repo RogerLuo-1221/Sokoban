@@ -10,13 +10,16 @@ public class Sokoban : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
-			"Core", 
-			"CoreUObject", 
-			"Engine", 
-			"InputCore", 
+			"Core",
+			"CoreUObject",
+			"Engine",
+			"InputCore",
 			"EnhancedInput",
 			"Json",
-			"JsonUtilities"
+			"JsonUtilities",
+			"UMG",
+			"Slate",
+			"SlateCore"
 		});
 	}
 }

@@ -66,6 +66,10 @@ private:
     UPROPERTY()
     TArray<TObjectPtr<ASokobanTileActor>> TileActors;
 
+    // --- Level Config DataAsset ---
+    UPROPERTY(EditAnywhere, Category = "Levels")
+    TObjectPtr<USokobanLevelConfig> LevelConfig;
+
     // --- Subclass references (set in BP or constructor) ---
     UPROPERTY(EditDefaultsOnly, Category = "Spawning")
     TSubclassOf<ASokobanPawn> PawnClass;
@@ -100,19 +104,24 @@ private:
     void SetupCamera();
 
     // --- Level flow ---
-    TArray<FString> LevelFiles;
     int32 CurrentLevelIndex = 0;
     bool bLevelComplete = false;
     bool bPlayTestMode = false;
     FTimerHandle NextLevelTimer;
 
-    void ScanLevelFiles();
     void LoadLevelByIndex(int32 Index);
 
 public:
-    /** Called by UI to advance to the next level after win screen. */
+    /** Load level by category (enum value = array index in LevelConfig). */
+    UFUNCTION(BlueprintCallable, Category = "Levels")
+    void LoadCategory(ELevelCategory Category);
+
+    /** Advance to the next level after win screen. */
     UFUNCTION(BlueprintCallable, Category = "Levels")
     void LoadNextLevel();
+
+    UFUNCTION(BlueprintPure, Category = "Levels")
+    bool IsLastLevel() const;
 
     UFUNCTION(BlueprintPure, Category = "Levels")
     bool IsLevelComplete() const { return bLevelComplete; }
@@ -121,5 +130,8 @@ public:
     int32 GetCurrentLevelIndex() const { return CurrentLevelIndex; }
 
     UFUNCTION(BlueprintPure, Category = "Levels")
-    int32 GetTotalLevelCount() const { return LevelFiles.Num(); }
+    int32 GetTotalLevelCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Levels")
+    bool IsPlayTestMode() const { return bPlayTestMode; }
 };

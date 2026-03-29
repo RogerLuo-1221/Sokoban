@@ -32,22 +32,9 @@ void ASokobanGridManager::BeginPlay()
         LoadLevelFromJSON(TempPath);
         IFileManager::Get().Delete(*TempPath);
         bPlayTestMode = true;
+        BuildLevel();
     }
-    else
-    {
-        // Scan for level files and load the first one
-        ScanLevelFiles();
-        if (LevelFiles.Num() > 0)
-        {
-            LoadLevelByIndex(0);
-        }
-        else
-        {
-            LoadDefaultLevel();
-        }
-    }
-
-    BuildLevel();
+    // Otherwise, wait for UI to call LoadCategory() — do NOT auto-load
 }
 
 // ============================================================
@@ -548,42 +535,47 @@ FVector ASokobanGridManager::GetGridCenter() const
 // Level Flow
 // ============================================================
 
-void ASokobanGridManager::ScanLevelFiles()
-{
-    FString LevelDir = FPaths::ProjectContentDir() / TEXT("Levels") / TEXT("LevelData");
-
-    TArray<FString> FileNames;
-    IFileManager::Get().FindFiles(FileNames, *(LevelDir / TEXT("*.json")), true, false);
-    FileNames.Sort();
-
-    LevelFiles.Empty();
-    for (const FString& FileName : FileNames)
-    {
-        LevelFiles.Add(LevelDir / FileName);
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("GridManager: Found %d level files"), LevelFiles.Num());
-}
-
 void ASokobanGridManager::LoadLevelByIndex(int32 Index)
 {
-    if (!LevelFiles.IsValidIndex(Index)) return;
+    if (!LevelConfig || !LevelConfig->Levels.IsValidIndex(Index)) return;
 
     CurrentLevelIndex = Index;
     bLevelComplete = false;
     UndoStack.Empty();
 
-    LoadLevelFromJSON(LevelFiles[Index]);
+    const FLevelEntry& Entry = LevelConfig->Levels[Index];
+    FString FullPath = FPaths::ProjectContentDir() / Entry.JsonFile.FilePath;
+
+    LoadLevelFromJSON(FullPath);
 
     UE_LOG(LogTemp, Log, TEXT("GridManager: Loaded level %d/%d: %s"),
-        Index + 1, LevelFiles.Num(), *FPaths::GetBaseFilename(LevelFiles[Index]));
+        Index + 1, LevelConfig->Levels.Num(), *Entry.DisplayName);
+}
+
+void ASokobanGridManager::LoadCategory(ELevelCategory Category)
+{
+    if (!LevelConfig)
+    {
+        UE_LOG(LogTemp, Error, TEXT("GridManager: LevelConfig DataAsset is not set!"));
+        return;
+    }
+
+    int32 Index = static_cast<int32>(Category);
+    if (!LevelConfig->Levels.IsValidIndex(Index))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GridManager: No level at index %d"), Index);
+        return;
+    }
+
+    ClearLevel();
+    LoadLevelByIndex(Index);
+    BuildLevel();
 }
 
 void ASokobanGridManager::LoadNextLevel()
 {
     if (bPlayTestMode)
     {
-        // PlayTest mode: no level sequence, just show completion
         if (GEngine)
         {
             GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("PlayTest complete. Return to editor."));
@@ -592,18 +584,26 @@ void ASokobanGridManager::LoadNextLevel()
     }
 
     int32 NextIndex = CurrentLevelIndex + 1;
-    if (NextIndex >= LevelFiles.Num())
+    if (!LevelConfig || NextIndex >= LevelConfig->Levels.Num())
     {
-        // All levels complete
         if (GEngine)
         {
             GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Yellow, TEXT("=== ALL LEVELS COMPLETE! ==="));
         }
-        UE_LOG(LogTemp, Warning, TEXT("=== ALL LEVELS COMPLETE ==="));
         return;
     }
 
     ClearLevel();
     LoadLevelByIndex(NextIndex);
     BuildLevel();
+}
+
+bool ASokobanGridManager::IsLastLevel() const
+{
+    return !LevelConfig || CurrentLevelIndex >= LevelConfig->Levels.Num() - 1;
+}
+
+int32 ASokobanGridManager::GetTotalLevelCount() const
+{
+    return LevelConfig ? LevelConfig->Levels.Num() : 0;
 }
