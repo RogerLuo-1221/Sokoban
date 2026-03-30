@@ -4,8 +4,8 @@
 #include "CoreMinimal.h"
 #include "Widgets/SLeafWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
+#include "Sokoban/SokobanTypes.h"
 
-struct FGridCell;
 class UEditorGridSubsystem;
 
 class SSokobanGrid : public SLeafWidget
@@ -38,5 +38,6 @@ private:
 	UEditorGridSubsystem* GetSubsystem() const;
 	FIntPoint GetGridCoord(const FGeometry& Geo, const FPointerEvent& Event) const;
 	void PaintAtCoord(FIntPoint Coord);
-	FLinearColor GetCellColor(const FGridCell& Cell) const;
+	FLinearColor GetTileColor(ETileType TileType) const;
+	FLinearColor GetEntityColor(EEntityType EntityType) const;
 };

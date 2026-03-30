@@ -28,7 +28,6 @@ void ASokobanGridManager::BeginPlay()
     FString TempPath = FPaths::ProjectSavedDir() / TEXT("Temp") / TEXT("SokobanPlayTest.json");
     if (FPaths::FileExists(TempPath))
     {
-        UE_LOG(LogTemp, Log, TEXT("GridManager: Loading play-test level from %s"), *TempPath);
         LoadLevelFromJSON(TempPath);
         IFileManager::Get().Delete(*TempPath);
         bPlayTestMode = true;
@@ -40,57 +39,6 @@ void ASokobanGridManager::BeginPlay()
 // ============================================================
 // Level Loading
 // ============================================================
-
-void ASokobanGridManager::LoadDefaultLevel()
-{
-    // Simple 6x6 test level
-    Width = 7;
-    Height = 7;
-    Grid.SetNum(Width * Height);
-
-    // Init all cells as Normal/None
-    for (int32 X = 0; X < Height; X++)
-    {
-        for (int32 Y = 0; Y < Width; Y++)
-        {
-            FGridCell& Cell = Grid[X * Width + Y];
-            Cell.Coordinate = FIntPoint(X, Y);
-            Cell.TileType = ETileType::Normal;
-            Cell.EntityType = EEntityType::None;
-        }
-    }
-
-    // Walls around the border
-    // Top & bottom rows (X=0 and X=Height-1)
-    for (int32 Y = 0; Y < Width; Y++)
-    {
-        GetCell(FIntPoint(0, Y)).TileType = ETileType::Wall;
-        GetCell(FIntPoint(Height - 1, Y)).TileType = ETileType::Wall;
-    }
-    // Left & right columns (Y=0 and Y=Width-1)
-    for (int32 X = 0; X < Height; X++)
-    {
-        GetCell(FIntPoint(X, 0)).TileType = ETileType::Wall;
-        GetCell(FIntPoint(X, Width - 1)).TileType = ETileType::Wall;
-    }
-
-    // Player at (1,1)
-    PlayerGridPos = FIntPoint(1, 1);
-    GetCell(PlayerGridPos).EntityType = EEntityType::Player;
-
-    // Box at (3,3)
-    GetCell(FIntPoint(3, 3)).EntityType = EEntityType::Box;
-
-    // Target pad at (4,4)
-    GetCell(FIntPoint(4, 4)).TileType = ETileType::TargetPad;
-
-    // Extra wall
-    GetCell(FIntPoint(3, 1)).TileType = ETileType::Wall;
-
-    // Save snapshot for reset
-    InitialGrid = Grid;
-    InitialPlayerPos = PlayerGridPos;
-}
 
 void ASokobanGridManager::SetupCamera()
 {
@@ -454,11 +402,6 @@ void ASokobanGridManager::CheckWinCondition()
     if (TotalPads > 0 && CoveredPads == TotalPads)
     {
         bLevelComplete = true;
-        UE_LOG(LogTemp, Warning, TEXT("=== LEVEL COMPLETE ==="));
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Green, TEXT("=== LEVEL COMPLETE! ==="));
-        }
         OnLevelComplete.Broadcast();
     }
 }
@@ -547,9 +490,6 @@ void ASokobanGridManager::LoadLevelByIndex(int32 Index)
     FString FullPath = FPaths::ProjectContentDir() / Entry.JsonFile.FilePath;
 
     LoadLevelFromJSON(FullPath);
-
-    UE_LOG(LogTemp, Log, TEXT("GridManager: Loaded level %d/%d: %s"),
-        Index + 1, LevelConfig->Levels.Num(), *Entry.DisplayName);
 }
 
 void ASokobanGridManager::LoadCategory(ELevelCategory Category)
@@ -576,20 +516,12 @@ void ASokobanGridManager::LoadNextLevel()
 {
     if (bPlayTestMode)
     {
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, TEXT("PlayTest complete. Return to editor."));
-        }
         return;
     }
 
     int32 NextIndex = CurrentLevelIndex + 1;
     if (!LevelConfig || NextIndex >= LevelConfig->Levels.Num())
     {
-        if (GEngine)
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 10.f, FColor::Yellow, TEXT("=== ALL LEVELS COMPLETE! ==="));
-        }
         return;
     }
 

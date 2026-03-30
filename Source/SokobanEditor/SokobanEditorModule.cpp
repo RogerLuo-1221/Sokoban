@@ -7,8 +7,6 @@ void FSokobanEditorModule::StartupModule()
 {
 	FSokobanEdModeStyle::Initialize();
 	FSokobanEdModeCommands::Register();
-
-	UE_LOG(LogTemp, Log, TEXT("SokobanEditor module loaded"));
 }
 
 void FSokobanEditorModule::ShutdownModule()

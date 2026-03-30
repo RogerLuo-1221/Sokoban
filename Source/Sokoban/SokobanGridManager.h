@@ -97,9 +97,6 @@ private:
                      FIntPoint BoxFrom, FIntPoint BoxTo);
     void CheckWinCondition();
 
-    // --- Default level for testing ---
-    void LoadDefaultLevel();
-
     // --- Camera Setting ---
     void SetupCamera();
 
@@ -107,7 +104,6 @@ private:
     int32 CurrentLevelIndex = 0;
     bool bLevelComplete = false;
     bool bPlayTestMode = false;
-    FTimerHandle NextLevelTimer;
 
     void LoadLevelByIndex(int32 Index);
 

@@ -10,6 +10,7 @@ class UTextBlock;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnNextLevelRequested);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnReturnToMenuRequested);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEndTestRequested);
 
 UCLASS()
 class SOKOBAN_API USokobanWinScreenWidget : public UUserWidget
@@ -23,9 +24,16 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnReturnToMenuRequested OnReturnToMenuRequested;
 
+	UPROPERTY(BlueprintAssignable)
+	FOnEndTestRequested OnEndTestRequested;
+
 	/** Call before showing to configure button visibility. */
 	UFUNCTION(BlueprintCallable, Category = "WinScreen")
 	void SetShowNextButton(bool bShow);
+
+	/** Switch to PlayTest mode: hide Next/BackToMenu, show EndTest. */
+	UFUNCTION(BlueprintCallable, Category = "WinScreen")
+	void SetPlayTestMode(bool bPlayTest);
 
 protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
@@ -35,6 +43,9 @@ protected:
 	TObjectPtr<UButton> Btn_BackToMenu;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+	TObjectPtr<UButton> Btn_EndTest;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
 	TObjectPtr<UTextBlock> Txt_WinMessage;
 
 	virtual void NativeConstruct() override;
@@ -42,7 +53,9 @@ protected:
 
 private:
 	bool bNextButtonVisible = true;
+	bool bIsPlayTestMode = false;
 
 	UFUNCTION() void OnNextLevelClicked();
 	UFUNCTION() void OnBackToMenuClicked();
+	UFUNCTION() void OnEndTestClicked();
 };

@@ -46,30 +46,43 @@ int32 SSokobanGrid::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 		for (int32 Y = 0; Y < W; ++Y)
 		{
 			FGridCell Cell = Sub->GetCellData(FIntPoint(X, Y));
-			FLinearColor Color = GetCellColor(Cell);
 
 			FVector2D CellPos(Y * CellSize, (H - 1 - X) * CellSize);
 			FVector2D CellDrawSize(CellSize - Gap, CellSize - Gap);
 
-			// Cell background
+			// Layer 0: Tile background (always drawn)
 			FSlateDrawElement::MakeBox(
 				OutDrawElements,
 				LayerId,
 				AllottedGeometry.ToPaintGeometry(CellDrawSize, FSlateLayoutTransform(CellPos)),
 				WhiteBrush,
 				ESlateDrawEffect::None,
-				Color);
+				GetTileColor(Cell.TileType));
 
-			// Entity label (P = Player, B = Box)
+			// Layer 1-2: Entity inset marker + label
 			if (Cell.EntityType != EEntityType::None)
 			{
+				// Inset colored block
+				const float Inset = CellSize * 0.2f;
+				FVector2D InnerPos(CellPos.X + Inset, CellPos.Y + Inset);
+				FVector2D InnerSize(CellSize - Gap - 2.0f * Inset, CellSize - Gap - 2.0f * Inset);
+
+				FSlateDrawElement::MakeBox(
+					OutDrawElements,
+					LayerId + 1,
+					AllottedGeometry.ToPaintGeometry(InnerSize, FSlateLayoutTransform(InnerPos)),
+					WhiteBrush,
+					ESlateDrawEffect::None,
+					GetEntityColor(Cell.EntityType));
+
+				// Text label
 				FString Label = (Cell.EntityType == EEntityType::Player) ? TEXT("P") : TEXT("B");
-				FVector2D TextOffset(Y * CellSize + CellSize * 0.3f, (H - 1 - X) * CellSize + CellSize * 0.15f);
+				FVector2D TextOffset(CellPos.X + CellSize * 0.3f, CellPos.Y + CellSize * 0.2f);
 
 				FSlateDrawElement::MakeText(
 					OutDrawElements,
-					LayerId + 1,
-					AllottedGeometry.ToPaintGeometry(CellDrawSize, FSlateLayoutTransform(TextOffset)),
+					LayerId + 2,
+					AllottedGeometry.ToPaintGeometry(InnerSize, FSlateLayoutTransform(TextOffset)),
 					Label,
 					Font,
 					ESlateDrawEffect::None,
@@ -78,7 +91,7 @@ int32 SSokobanGrid::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeo
 		}
 	}
 
-	return LayerId + 2;
+	return LayerId + 3;
 }
 
 // --- Mouse interaction ---
@@ -112,6 +125,7 @@ FReply SSokobanGrid::OnMouseButtonDown(const FGeometry& MyGeometry, const FPoint
 	{
 		bIsPainting = true;
 		LastPaintedCoord = FIntPoint(-1, -1);
+		if (UEditorGridSubsystem* Sub = GetSubsystem()) Sub->BeginStroke();
 		PaintAtCoord(GetGridCoord(MyGeometry, MouseEvent));
 		return FReply::Handled().CaptureMouse(SharedThis(this));
 	}
@@ -134,23 +148,17 @@ FReply SSokobanGrid::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointer
 	{
 		bIsPainting = false;
 		LastPaintedCoord = FIntPoint(-1, -1);
+		if (UEditorGridSubsystem* Sub = GetSubsystem()) Sub->EndStroke();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 	return FReply::Unhandled();
 }
 
-// --- Cell color mapping ---
+// --- Color mapping ---
 
-FLinearColor SSokobanGrid::GetCellColor(const FGridCell& Cell) const
+FLinearColor SSokobanGrid::GetTileColor(ETileType TileType) const
 {
-	// Entity colors take priority
-	if (Cell.EntityType == EEntityType::Player)
-		return FLinearColor(0.2f, 0.5f, 1.0f);   // Blue
-	if (Cell.EntityType == EEntityType::Box)
-		return FLinearColor(0.9f, 0.6f, 0.2f);    // Orange
-
-	// Tile type colors
-	switch (Cell.TileType)
+	switch (TileType)
 	{
 	case ETileType::Wall:      return FLinearColor(0.35f, 0.35f, 0.35f); // Dark gray
 	case ETileType::Ice:       return FLinearColor(0.7f, 0.9f, 1.0f);    // Cyan
@@ -158,3 +166,14 @@ FLinearColor SSokobanGrid::GetCellColor(const FGridCell& Cell) const
 	default:                   return FLinearColor(0.88f, 0.88f, 0.88f);  // Light gray
 	}
 }
+
+FLinearColor SSokobanGrid::GetEntityColor(EEntityType EntityType) const
+{
+	switch (EntityType)
+	{
+	case EEntityType::Player: return FLinearColor(0.2f, 0.5f, 1.0f);   // Blue
+	case EEntityType::Box:    return FLinearColor(0.9f, 0.6f, 0.2f);   // Orange
+	default:                  return FLinearColor(1.0f, 1.0f, 1.0f);   // White (shouldn't happen)
+	}
+}
+

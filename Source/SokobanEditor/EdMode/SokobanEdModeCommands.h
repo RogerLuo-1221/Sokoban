@@ -10,7 +10,7 @@ public:
 	FSokobanEdModeCommands()
 		: TCommands<FSokobanEdModeCommands>(
 			TEXT("SokobanEditorMode"),
-			NSLOCTEXT("SokobanEditor", "SokobanEditorModeCommands", "Sokoban Editor Mode"),
+			NSLOCTEXT("SokobanEditor", "SokobanEditorModeCommands", "推箱子编辑模式"),
 			NAME_None,
 			FSokobanEdModeStyle::GetStyleSetName())
 	{
@@ -18,8 +18,6 @@ public:
 
 	virtual void RegisterCommands() override;
 
-	TSharedPtr<FUICommandInfo> PaintTool;
-	TSharedPtr<FUICommandInfo> EraseTool;
-
 	TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> GetCommands() const;
 };
+

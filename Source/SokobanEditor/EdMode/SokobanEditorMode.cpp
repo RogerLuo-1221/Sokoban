@@ -1,6 +1,5 @@
 #include "SokobanEditorMode.h"
 #include "SokobanEdModeToolkit.h"
-#include "SokobanEdModeCommands.h"
 #include "Subsystem/EditorGridSubsystem.h"
 #include "Editor.h"
 
@@ -10,7 +9,7 @@ USokobanEditorMode::USokobanEditorMode()
 {
 	Info = FEditorModeInfo(
 		EM_SokobanEditorMode,
-		NSLOCTEXT("SokobanEditor", "ModeName", "Sokoban Edit"),
+		NSLOCTEXT("SokobanEditor", "ModeName", "推箱子编辑"),
 		FSlateIcon(),
 		true);
 }
@@ -18,8 +17,6 @@ USokobanEditorMode::USokobanEditorMode()
 void USokobanEditorMode::Enter()
 {
 	UEdMode::Enter();
-
-	UE_LOG(LogTemp, Log, TEXT("SokobanEditorMode: Enter"));
 
 	if (UEditorGridSubsystem* Sub = GEditor->GetEditorSubsystem<UEditorGridSubsystem>())
 	{
@@ -34,8 +31,6 @@ void USokobanEditorMode::Exit()
 		Sub->ExitEditMode();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("SokobanEditorMode: Exit"));
-
 	UEdMode::Exit();
 }
 
@@ -44,7 +39,3 @@ void USokobanEditorMode::CreateToolkit()
 	Toolkit = MakeShareable(new FSokobanEdModeToolkit);
 }
 
-TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> USokobanEditorMode::GetModeCommands() const
-{
-	return FSokobanEdModeCommands::Get().GetCommands();
-}

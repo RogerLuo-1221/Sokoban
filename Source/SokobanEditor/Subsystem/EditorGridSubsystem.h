@@ -9,6 +9,13 @@ class ASokobanTileActor;
 class ASokobanPawn;
 class ASokobanBoxActor;
 
+struct FGridSnapshot
+{
+	int32 Width;
+	int32 Height;
+	TArray<FGridCell> Grid;
+};
+
 UENUM(BlueprintType)
 enum class EPaintMode : uint8
 {
@@ -45,9 +52,6 @@ public:
 	// --- Paint API (called by Tools) ---
 	UFUNCTION(BlueprintCallable, Category = "SokobanEditor")
 	void PaintAt(FIntPoint Coord);
-
-	UFUNCTION(BlueprintCallable, Category = "SokobanEditor")
-	void EraseAt(FIntPoint Coord);
 
 	// --- Active Selection (set by EUW panel) ---
 	UFUNCTION(BlueprintCallable, Category = "SokobanEditor")
@@ -96,6 +100,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SokobanEditor")
 	void LoadWithDialog();
 
+	// --- Undo ---
+	void Undo();
+	void BeginStroke();
+	void EndStroke();
+
 	// --- Play Test ---
 	UFUNCTION(BlueprintCallable, Category = "SokobanEditor")
 	void PlayTest();
@@ -125,8 +134,8 @@ private:
 	FString LevelName = TEXT("Untitled");
 
 	EPaintMode CurrentPaintMode = EPaintMode::TileType;
-	ETileType ActiveTileType = ETileType::Normal;
-	EEntityType ActiveEntityType = EEntityType::Box;
+	ETileType ActiveTileType = ETileType::Wall;
+	EEntityType ActiveEntityType = EEntityType::Player;
 
 	// --- Preview Actors ---
 	UPROPERTY()
@@ -151,6 +160,12 @@ private:
 
 	// --- Validation ---
 	bool ValidateLevel(FString& OutError) const;
+
+	// --- Undo Stack ---
+	static constexpr int32 MaxUndoSteps = 50;
+	TArray<FGridSnapshot> UndoStack;
+	bool bStrokeActive = false;
+	void PushSnapshot();
 
 	// --- Internal Helpers ---
 	void LoadBlueprintClasses();

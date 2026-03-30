@@ -69,4 +69,5 @@ private:
 	UFUNCTION() void OnLevelComplete();
 	UFUNCTION() void OnNextLevelRequested();
 	UFUNCTION() void OnReturnToMenuRequested();
+	UFUNCTION() void OnEndTestRequested();
 };

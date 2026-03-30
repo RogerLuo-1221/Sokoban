@@ -6,6 +6,7 @@
 #include "UI/SokobanMainMenuWidget.h"
 #include "UI/SokobanWinScreenWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 
 ASokobanPlayerController::ASokobanPlayerController()
@@ -54,6 +55,7 @@ void ASokobanPlayerController::BeginPlay()
 			WinScreenWidget->SetVisibility(ESlateVisibility::Collapsed);
 			WinScreenWidget->OnNextLevelRequested.AddDynamic(this, &ASokobanPlayerController::OnNextLevelRequested);
 			WinScreenWidget->OnReturnToMenuRequested.AddDynamic(this, &ASokobanPlayerController::OnReturnToMenuRequested);
+			WinScreenWidget->OnEndTestRequested.AddDynamic(this, &ASokobanPlayerController::OnEndTestRequested);
 		}
 	}
 
@@ -68,7 +70,8 @@ void ASokobanPlayerController::BeginPlay()
 	{
 		// PlayTest mode or no UI configured: go straight to game
 		bInMenu = false;
-		SetInputMode(FInputModeGameOnly());
+		bShowMouseCursor = true;
+		SetInputMode(FInputModeGameAndUI());
 		if (MainMenuWidget)
 		{
 			MainMenuWidget->SetVisibility(ESlateVisibility::Collapsed);
@@ -189,6 +192,16 @@ void ASokobanPlayerController::OnLevelComplete()
 {
 	if (!GridManager) return;
 
+	if (GridManager->IsPlayTestMode())
+	{
+		if (WinScreenWidget)
+		{
+			WinScreenWidget->SetPlayTestMode(true);
+			ShowWinScreen();
+		}
+		return;
+	}
+
 	bool bIsLast = GridManager->IsLastLevel();
 
 	if (WinScreenWidget)
@@ -218,4 +231,9 @@ void ASokobanPlayerController::OnReturnToMenuRequested()
 	}
 
 	ShowMainMenu();
+}
+
+void ASokobanPlayerController::OnEndTestRequested()
+{
+	UKismetSystemLibrary::QuitGame(this, nullptr, EQuitPreference::Quit, false);
 }

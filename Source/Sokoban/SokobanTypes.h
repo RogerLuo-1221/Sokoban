@@ -17,8 +17,8 @@ UENUM(BlueprintType)
 enum class EEntityType : uint8
 {
 	None,
-	Box,
-	Player
+	Player,
+	Box
 };
 
 UENUM(BlueprintType)

@@ -11,7 +11,4 @@ class SOKOBAN_API ASokobanGameMode : public AGameModeBase
 
 public:
 	ASokobanGameMode();
-
-protected:
-	virtual void BeginPlay() override;
 };

@@ -12,10 +12,11 @@
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Misc/MessageDialog.h"
+#include "EditorActorFolders.h"
 
 void UEditorGridSubsystem::EnterEditMode()
 {
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: EnterEditMode"));
+	UndoStack.Empty();
 	LoadBlueprintClasses();
 	CreateNewGrid(Width, Height);
 	RebuildPreview();
@@ -23,7 +24,6 @@ void UEditorGridSubsystem::EnterEditMode()
 
 void UEditorGridSubsystem::ExitEditMode()
 {
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: ExitEditMode"));
 	ClearPreview();
 	Grid.Empty();
 }
@@ -45,12 +45,54 @@ void UEditorGridSubsystem::CreateNewGrid(int32 InWidth, int32 InHeight)
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: Created %dx%d grid"), Width, Height);
 	OnGridChanged.Broadcast();
 }
 
+// --- Undo ---
+
+void UEditorGridSubsystem::PushSnapshot()
+{
+	FGridSnapshot Snap;
+	Snap.Width = Width;
+	Snap.Height = Height;
+	Snap.Grid = Grid;
+	UndoStack.Add(MoveTemp(Snap));
+
+	if (UndoStack.Num() > MaxUndoSteps)
+	{
+		UndoStack.RemoveAt(0);
+	}
+}
+
+void UEditorGridSubsystem::Undo()
+{
+	if (UndoStack.IsEmpty()) return;
+
+	FGridSnapshot Snap = UndoStack.Pop();
+	Width = Snap.Width;
+	Height = Snap.Height;
+	Grid = MoveTemp(Snap.Grid);
+
+	OnGridChanged.Broadcast();
+	RebuildPreview();
+}
+
+void UEditorGridSubsystem::BeginStroke()
+{
+	PushSnapshot();
+	bStrokeActive = true;
+}
+
+void UEditorGridSubsystem::EndStroke()
+{
+	bStrokeActive = false;
+}
+
+// --- Grid Management ---
+
 void UEditorGridSubsystem::ResizeGrid(int32 NewWidth, int32 NewHeight)
 {
+	PushSnapshot();
 	TArray<FGridCell> OldGrid = Grid;
 	int32 OldWidth = Width;
 	int32 OldHeight = Height;
@@ -73,6 +115,7 @@ void UEditorGridSubsystem::ResizeGrid(int32 NewWidth, int32 NewHeight)
 
 void UEditorGridSubsystem::ClearGrid()
 {
+	PushSnapshot();
 	CreateNewGrid(Width, Height);
 	RebuildPreview();
 }
@@ -106,20 +149,6 @@ void UEditorGridSubsystem::PaintAt(FIntPoint Coord)
 		break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: PaintAt (%d, %d) Mode=%d"), Coord.X, Coord.Y, (int32)CurrentPaintMode);
-	OnGridChanged.Broadcast();
-	RebuildPreview();
-}
-
-void UEditorGridSubsystem::EraseAt(FIntPoint Coord)
-{
-	if (!IsValidCoord(Coord)) return;
-
-	FGridCell& Cell = GetCell(Coord);
-	Cell.TileType = ETileType::Normal;
-	Cell.EntityType = EEntityType::None;
-
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: EraseAt (%d, %d)"), Coord.X, Coord.Y);
 	OnGridChanged.Broadcast();
 	RebuildPreview();
 }
@@ -144,8 +173,8 @@ void UEditorGridSubsystem::SaveToJSON(const FString& FullPath)
 	JsonObj->SetStringField("name", LevelName);
 	JsonObj->SetNumberField("width", Width);
 	JsonObj->SetNumberField("height", Height);
-	JsonObj->SetStringField("_tile_legend", "0=Normal 1=Wall 2=Ice 3=TargetPad");
-	JsonObj->SetStringField("_entity_legend", "0=None 1=Box 2=Player");
+	JsonObj->SetStringField("_地格索引", "0=空地 1=墙体 2=冰面 3=目标点");
+	JsonObj->SetStringField("_实体索引", "0=无 1=玩家 2=箱子");
 
 	// 2D arrays: outer = rows (GridX, 0..Height-1), inner = columns (GridY, 0..Width-1)
 	TArray<TSharedPtr<FJsonValue>> TilesRows;
@@ -170,11 +199,11 @@ void UEditorGridSubsystem::SaveToJSON(const FString& FullPath)
 	FJsonSerializer::Serialize(JsonObj, Writer);
 
 	FFileHelper::SaveStringToFile(OutputString, *FullPath);
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: SaveToJSON -> %s"), *FullPath);
 }
 
 void UEditorGridSubsystem::LoadFromJSON(const FString& FullPath)
 {
+	PushSnapshot();
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FullPath))
 	{
@@ -230,7 +259,6 @@ void UEditorGridSubsystem::LoadFromJSON(const FString& FullPath)
 
 	// Extract level name from file path
 	LevelName = FPaths::GetBaseFilename(FullPath);
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: LoadFromJSON <- %s (%dx%d)"), *FullPath, Width, Height);
 	OnGridChanged.Broadcast();
 	RebuildPreview();
 }
@@ -247,7 +275,7 @@ void UEditorGridSubsystem::SaveWithDialog()
 	if (!ValidateLevel(Error))
 	{
 		FMessageDialog::Open(EAppMsgType::Ok,
-			FText::Format(NSLOCTEXT("SokobanEditor", "SaveValidation", "Cannot save: {0}"),
+			FText::Format(NSLOCTEXT("SokobanEditor", "SaveValidation", "无法保存：{0}"),
 			FText::FromString(Error)));
 		return;
 	}
@@ -263,10 +291,10 @@ void UEditorGridSubsystem::SaveWithDialog()
 	TArray<FString> OutFiles;
 	bool bOpened = DesktopPlatform->SaveFileDialog(
 		ParentWindowHandle,
-		TEXT("Save Sokoban Level"),
+		TEXT("保存推箱子关卡"),
 		DefaultDir,
 		LevelName + TEXT(".json"),
-		TEXT("JSON Files (*.json)|*.json"),
+		TEXT("JSON 文件 (*.json)|*.json"),
 		0,
 		OutFiles);
 
@@ -289,10 +317,10 @@ void UEditorGridSubsystem::LoadWithDialog()
 	TArray<FString> OutFiles;
 	bool bOpened = DesktopPlatform->OpenFileDialog(
 		ParentWindowHandle,
-		TEXT("Load Sokoban Level"),
+		TEXT("加载推箱子关卡"),
 		DefaultDir,
 		TEXT(""),
-		TEXT("JSON Files (*.json)|*.json"),
+		TEXT("JSON 文件 (*.json)|*.json"),
 		0,
 		OutFiles);
 
@@ -311,12 +339,12 @@ bool UEditorGridSubsystem::ValidateLevel(FString& OutError) const
 		if (Cell.EntityType == EEntityType::Box) Boxes++;
 		if (Cell.TileType == ETileType::TargetPad) Targets++;
 	}
-	if (Players == 0) { OutError = TEXT("No player placed!"); return false; }
-	if (Boxes == 0) { OutError = TEXT("No boxes placed!"); return false; }
-	if (Targets == 0) { OutError = TEXT("No target pads placed!"); return false; }
+	if (Players == 0) { OutError = TEXT("未放置玩家！"); return false; }
+	if (Boxes == 0) { OutError = TEXT("未放置箱子！"); return false; }
+	if (Targets == 0) { OutError = TEXT("未放置目标点！"); return false; }
 	if (Boxes != Targets)
 	{
-		OutError = FString::Printf(TEXT("Box count (%d) != TargetPad count (%d)!"), Boxes, Targets);
+		OutError = FString::Printf(TEXT("箱子数量（%d）与目标点数量（%d）不一致！"), Boxes, Targets);
 		return false;
 	}
 	return true;
@@ -329,7 +357,7 @@ void UEditorGridSubsystem::PlayTest()
 	if (!ValidateLevel(Error))
 	{
 		FMessageDialog::Open(EAppMsgType::Ok,
-			FText::Format(NSLOCTEXT("SokobanEditor", "PlayTestValidation", "Cannot PlayTest: {0}"),
+			FText::Format(NSLOCTEXT("SokobanEditor", "PlayTestValidation", "无法试玩：{0}"),
 			FText::FromString(Error)));
 		return;
 	}
@@ -355,13 +383,11 @@ void UEditorGridSubsystem::PlayTest()
 		FRequestPlaySessionParams Params;
 		Params.WorldType = EPlaySessionWorldType::PlayInEditor;
 		GEditor->RequestPlaySession(Params);
-		UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: PlayTest launched PIE with temp level: %s"), *TempPath);
 	}
 }
 
 void UEditorGridSubsystem::OnEndPIE(bool bIsSimulating)
 {
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: PIE ended, restoring preview"));
 	RebuildPreview();
 
 	// Unbind so we don't accumulate delegates
@@ -387,8 +413,6 @@ void UEditorGridSubsystem::LoadBlueprintClasses()
 			TEXT("/Game/Blueprints/BP_SokobanBox.BP_SokobanBox_C"));
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("EditorGridSubsystem: BP classes loaded - Tile:%d Pawn:%d Box:%d"),
-		TileClass != nullptr, PawnClass != nullptr, BoxClass != nullptr);
 }
 
 void UEditorGridSubsystem::RebuildPreview()
@@ -411,6 +435,7 @@ void UEditorGridSubsystem::RebuildPreview()
 				TileClass, WorldPos, FRotator::ZeroRotator);
 			if (Tile)
 			{
+				Tile->SetFlags(RF_Transient);
 				Tile->InitTile(Cell.TileType);
 				Tile->SetFolderPath(FolderPath);
 				PreviewActors.Add(Tile);
@@ -422,12 +447,12 @@ void UEditorGridSubsystem::RebuildPreview()
 		if (Cell.EntityType == EEntityType::Player && PawnClass)
 		{
 			AActor* Pawn = World->SpawnActor<AActor>(PawnClass, EntityPos, FRotator::ZeroRotator);
-			if (Pawn) { Pawn->SetFolderPath(FolderPath); EntityPreviewActors.Add(Pawn); }
+			if (Pawn) { Pawn->SetFlags(RF_Transient); Pawn->SetFolderPath(FolderPath); EntityPreviewActors.Add(Pawn); }
 		}
 		else if (Cell.EntityType == EEntityType::Box && BoxClass)
 		{
 			AActor* Box = World->SpawnActor<AActor>(BoxClass, EntityPos, FRotator::ZeroRotator);
-			if (Box) { Box->SetFolderPath(FolderPath); EntityPreviewActors.Add(Box); }
+			if (Box) { Box->SetFlags(RF_Transient); Box->SetFolderPath(FolderPath); EntityPreviewActors.Add(Box); }
 		}
 	}
 }
@@ -445,6 +470,12 @@ void UEditorGridSubsystem::ClearPreview()
 		if (Actor) Actor->Destroy();
 	}
 	EntityPreviewActors.Empty();
+
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (World)
+	{
+		FActorFolders::Get().DeleteFolder(*World, FName(TEXT("Sokoban Level Preview")));
+	}
 }
 
 FGridCell& UEditorGridSubsystem::GetCell(FIntPoint Coord)
@@ -457,3 +488,6 @@ FVector UEditorGridSubsystem::GridToWorld(FIntPoint Coord) const
 	// GridX=up(Height)→WorldX, GridY=right(Width)→WorldY
 	return FVector(Coord.X * CellSize, Coord.Y * CellSize, 0.f);
 }
+
+
+

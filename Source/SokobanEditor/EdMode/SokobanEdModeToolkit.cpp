@@ -1,14 +1,19 @@
 // SokobanEdModeToolkit.cpp
 #include "SokobanEdModeToolkit.h"
+#include "SokobanEditorMode.h"
 #include "Subsystem/EditorGridSubsystem.h"
 #include "Widget/SSokobanGrid.h"
 #include "Editor.h"
+#include "EditorModeManager.h"
+#include "Containers/Ticker.h"
 
+#include "Widgets/Docking/SDockTab.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSpinBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Styling/CoreStyle.h"
@@ -42,6 +47,30 @@ static TSharedRef<SWidget> MakePaletteButton(
 		];
 }
 
+void FSokobanEdModeToolkit::InvokeUI()
+{
+	FModeToolkit::InvokeUI();
+
+	// Hook PrimaryTab close — when user closes the toolkit panel,
+	// deactivate the mode (deferred to avoid re-entrancy during tab destruction).
+	if (TSharedPtr<SDockTab> Tab = PrimaryTab.Pin())
+	{
+		Tab->SetOnTabClosed(SDockTab::FOnTabClosedCallback::CreateLambda(
+			[](TSharedRef<SDockTab>)
+			{
+				FTSTicker::GetCoreTicker().AddTicker(
+					FTickerDelegate::CreateLambda([](float) -> bool
+					{
+						if (GLevelEditorModeTools().IsModeActive(USokobanEditorMode::EM_SokobanEditorMode))
+						{
+							GLevelEditorModeTools().DeactivateMode(USokobanEditorMode::EM_SokobanEditorMode);
+						}
+						return false;
+					}));
+			}));
+	}
+}
+
 void FSokobanEdModeToolkit::Init(
 	const TSharedPtr<IToolkitHost>& InitToolkitHost,
 	TWeakObjectPtr<UEdMode> InOwningMode)
@@ -54,6 +83,9 @@ void FSokobanEdModeToolkit::Init(
 	TSharedPtr<int32> GridW = MakeShared<int32>(Sub ? Sub->GetGridWidth() : 8);
 	TSharedPtr<int32> GridH = MakeShared<int32>(Sub ? Sub->GetGridHeight() : 8);
 
+	// Initialize type options for default category (Tile)
+	RebuildTypeOptions(Sub);
+
 	PanelWidget = SNew(SScrollBox)
 		+ SScrollBox::Slot().Padding(8)
 		[
@@ -63,7 +95,7 @@ void FSokobanEdModeToolkit::Init(
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 0, 0, 4)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("Title", "Sokoban Level Editor"))
+				.Text(LOCTEXT("Title", "推箱子关卡编辑器"))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
 			]
 
@@ -73,7 +105,7 @@ void FSokobanEdModeToolkit::Init(
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("LevelNameLabel", "Level"))
+					SNew(STextBlock).Text(LOCTEXT("LevelNameLabel", "关卡名"))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1)
 				[
@@ -92,7 +124,7 @@ void FSokobanEdModeToolkit::Init(
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("GridW", "W"))
+					SNew(STextBlock).Text(LOCTEXT("GridW", "宽"))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 4, 0)
 				[
@@ -103,7 +135,7 @@ void FSokobanEdModeToolkit::Init(
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
 				[
-					SNew(STextBlock).Text(LOCTEXT("GridH", "H"))
+					SNew(STextBlock).Text(LOCTEXT("GridH", "高"))
 				]
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(0, 0, 4, 0)
 				[
@@ -121,7 +153,7 @@ void FSokobanEdModeToolkit::Init(
 						return FReply::Handled();
 					})
 					[
-						SNew(STextBlock).Text(LOCTEXT("Resize", "Resize"))
+						SNew(STextBlock).Text(LOCTEXT("Resize", "应用"))
 					]
 				]
 			]
@@ -131,74 +163,114 @@ void FSokobanEdModeToolkit::Init(
 				SNew(SSeparator)
 			]
 
-			// ========== Tile Palette ==========
+			// ========== Brush Section ==========
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 2)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("TilePalette", "Tile Palette"))
+				.Text(LOCTEXT("BrushHeader", "画笔"))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 			]
+
+			// Brush Mode: Paint / Erase
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
 				[
-					MakePaletteButton(LOCTEXT("Normal", "Normal"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::TileType); Sub->SetActiveTileType(ETileType::Normal); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::TileType && Sub->GetActiveTileType() == ETileType::Normal; })
+					MakePaletteButton(LOCTEXT("Paint", "绘制"),
+					[this, Sub]()
+					{
+						if (Sub && Sub->GetPaintMode() == EPaintMode::Erase)
+						{
+							Sub->SetPaintMode(LastPaintMode);
+							RebuildTypeOptions(Sub);
+						}
+					},
+					[Sub]() { return Sub && Sub->GetPaintMode() != EPaintMode::Erase; })
 				]
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
 				[
-					MakePaletteButton(LOCTEXT("Wall", "Wall"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::TileType); Sub->SetActiveTileType(ETileType::Wall); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::TileType && Sub->GetActiveTileType() == ETileType::Wall; })
-				]
-				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
-				[
-					MakePaletteButton(LOCTEXT("Ice", "Ice"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::TileType); Sub->SetActiveTileType(ETileType::Ice); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::TileType && Sub->GetActiveTileType() == ETileType::Ice; })
-				]
-				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
-				[
-					MakePaletteButton(LOCTEXT("TargetPad", "Target"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::TileType); Sub->SetActiveTileType(ETileType::TargetPad); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::TileType && Sub->GetActiveTileType() == ETileType::TargetPad; })
-				]
-			]
-
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
-			[
-				SNew(SSeparator)
-			]
-
-			// ========== Entity Palette ==========
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 2)
-			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("EntityPalette", "Entity Palette"))
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
-				[
-					MakePaletteButton(LOCTEXT("Player", "Player"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::EntityType); Sub->SetActiveEntityType(EEntityType::Player); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::EntityType && Sub->GetActiveEntityType() == EEntityType::Player; })
-				]
-				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
-				[
-					MakePaletteButton(LOCTEXT("Box", "Box"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::EntityType); Sub->SetActiveEntityType(EEntityType::Box); } },
-					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::EntityType && Sub->GetActiveEntityType() == EEntityType::Box; })
-				]
-				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
-				[
-					MakePaletteButton(LOCTEXT("Erase", "Erase"),
-					[Sub]() { if (Sub) { Sub->SetPaintMode(EPaintMode::Erase); } },
+					MakePaletteButton(LOCTEXT("Erase", "擦除"),
+					[this, Sub]()
+					{
+						if (Sub && Sub->GetPaintMode() != EPaintMode::Erase)
+						{
+							LastPaintMode = Sub->GetPaintMode();
+						}
+						if (Sub) Sub->SetPaintMode(EPaintMode::Erase);
+					},
 					[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::Erase; })
+				]
+			]
+
+			// Paint Options (hidden when Erase mode)
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
+			[
+				SNew(SVerticalBox)
+				.Visibility_Lambda([Sub]()
+				{
+					return (Sub && Sub->GetPaintMode() != EPaintMode::Erase)
+						? EVisibility::Visible : EVisibility::Collapsed;
+				})
+
+				// Category: Tile / Entity
+				+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
+					[
+						MakePaletteButton(LOCTEXT("TileCategory", "地块"),
+						[this, Sub]()
+						{
+							if (Sub)
+							{
+								Sub->SetPaintMode(EPaintMode::TileType);
+								RebuildTypeOptions(Sub);
+							}
+						},
+						[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::TileType; })
+					]
+					+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
+					[
+						MakePaletteButton(LOCTEXT("EntityCategory", "实体"),
+						[this, Sub]()
+						{
+							if (Sub)
+							{
+								Sub->SetPaintMode(EPaintMode::EntityType);
+								RebuildTypeOptions(Sub);
+							}
+						},
+						[Sub]() { return Sub && Sub->GetPaintMode() == EPaintMode::EntityType; })
+					]
+				]
+
+				// Type dropdown
+				+ SVerticalBox::Slot().AutoHeight().Padding(4, 4)
+				[
+					SAssignNew(TypeComboBox, SComboBox<TSharedPtr<FString>>)
+					.OptionsSource(&TypeOptions)
+					.OnSelectionChanged_Lambda([this, Sub](TSharedPtr<FString> Item, ESelectInfo::Type)
+					{
+						if (Item.IsValid())
+						{
+							SelectedTypeItem = Item;
+							ApplySelectedType(Sub, Item);
+						}
+					})
+					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item) -> TSharedRef<SWidget>
+					{
+						return SNew(STextBlock).Text(FText::FromString(*Item));
+					})
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							return SelectedTypeItem.IsValid()
+								? FText::FromString(*SelectedTypeItem)
+								: FText::GetEmpty();
+						})
+					]
 				]
 			]
 
@@ -211,7 +283,7 @@ void FSokobanEdModeToolkit::Init(
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 2)
 			[
 				SNew(STextBlock)
-				.Text(LOCTEXT("GridLabel", "Grid"))
+				.Text(LOCTEXT("GridLabel", "网格"))
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 			]
 			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 4)
@@ -230,21 +302,28 @@ void FSokobanEdModeToolkit::Init(
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
 				[
-					MakePaletteButton(LOCTEXT("Save", "Save"), [Sub]()
+					MakePaletteButton(LOCTEXT("Undo", "撤销"), [Sub]()
+					{
+						if (Sub) Sub->Undo();
+					})
+				]
+				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
+				[
+					MakePaletteButton(LOCTEXT("Save", "保存"), [Sub]()
 					{
 						if (Sub) Sub->SaveWithDialog();
 					})
 				]
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
 				[
-					MakePaletteButton(LOCTEXT("Load", "Load"), [Sub]()
+					MakePaletteButton(LOCTEXT("Load", "加载"), [Sub]()
 					{
 						if (Sub) Sub->LoadWithDialog();
 					})
 				]
 				+ SHorizontalBox::Slot().FillWidth(1).Padding(2)
 				[
-					MakePaletteButton(LOCTEXT("Clear", "Clear"), [Sub]()
+					MakePaletteButton(LOCTEXT("Clear", "清空"), [Sub]()
 					{
 						if (Sub) Sub->ClearGrid();
 					})
@@ -260,14 +339,79 @@ void FSokobanEdModeToolkit::Init(
 				})
 				[
 					SNew(STextBlock)
-					.Text(LOCTEXT("PlayTest", "Play Test"))
+					.Text(LOCTEXT("PlayTest", "试玩"))
 					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 					.Justification(ETextJustify::Center)
 				]
 			]
 		];
+}
 
-	UE_LOG(LogTemp, Log, TEXT("SokobanEdModeToolkit: Panel built with Slate"));
+void FSokobanEdModeToolkit::RebuildTypeOptions(UEditorGridSubsystem* Sub)
+{
+	TypeOptions.Empty();
+
+	if (!Sub) return;
+
+	if (Sub->GetPaintMode() != EPaintMode::EntityType)
+	{
+		// Tile types (Normal excluded — use Erase to reset to Normal)
+		TypeOptions.Add(MakeShared<FString>(TEXT("墙体")));      // index 0 → Wall(1)
+		TypeOptions.Add(MakeShared<FString>(TEXT("冰面")));      // index 1 → Ice(2)
+		TypeOptions.Add(MakeShared<FString>(TEXT("目标点")));    // index 2 → TargetPad(3)
+
+		// Select the one matching current active tile
+		int32 Index = (int32)Sub->GetActiveTileType() - 1; // Wall=1→idx0, Ice=2→idx1, TargetPad=3→idx2
+		if (TypeOptions.IsValidIndex(Index))
+		{
+			SelectedTypeItem = TypeOptions[Index];
+		}
+		else
+		{
+			SelectedTypeItem = TypeOptions[0];
+		}
+	}
+	else
+	{
+		// Entity types: order matches EEntityType (Player=1, Box=2)
+		TypeOptions.Add(MakeShared<FString>(TEXT("玩家")));     // index 0 → enum 1
+		TypeOptions.Add(MakeShared<FString>(TEXT("箱子")));     // index 1 → enum 2
+
+		int32 Index = (int32)Sub->GetActiveEntityType() - 1;
+		if (TypeOptions.IsValidIndex(Index))
+		{
+			SelectedTypeItem = TypeOptions[Index];
+		}
+		else
+		{
+			SelectedTypeItem = TypeOptions[0];
+		}
+	}
+
+	if (TypeComboBox.IsValid())
+	{
+		TypeComboBox->RefreshOptions();
+		TypeComboBox->SetSelectedItem(SelectedTypeItem);
+	}
+}
+
+void FSokobanEdModeToolkit::ApplySelectedType(UEditorGridSubsystem* Sub, TSharedPtr<FString> Item)
+{
+	if (!Sub || !Item.IsValid()) return;
+
+	const FString& TypeName = *Item;
+
+	if (Sub->GetPaintMode() == EPaintMode::TileType)
+	{
+		if (TypeName == TEXT("墙体"))           Sub->SetActiveTileType(ETileType::Wall);
+		else if (TypeName == TEXT("冰面"))     Sub->SetActiveTileType(ETileType::Ice);
+		else if (TypeName == TEXT("目标点"))  Sub->SetActiveTileType(ETileType::TargetPad);
+	}
+	else if (Sub->GetPaintMode() == EPaintMode::EntityType)
+	{
+		if (TypeName == TEXT("玩家"))  Sub->SetActiveEntityType(EEntityType::Player);
+		else if (TypeName == TEXT("箱子")) Sub->SetActiveEntityType(EEntityType::Box);
+	}
 }
 
 TSharedPtr<SWidget> FSokobanEdModeToolkit::GetInlineContent() const
@@ -287,7 +431,8 @@ FName FSokobanEdModeToolkit::GetToolkitFName() const
 
 FText FSokobanEdModeToolkit::GetBaseToolkitName() const
 {
-	return LOCTEXT("ToolkitName", "Sokoban Editor Toolkit");
+	return LOCTEXT("ToolkitName", "推箱子编辑器工具面板");
 }
 
 #undef LOCTEXT_NAMESPACE
+
